@@ -154,7 +154,6 @@ def send_reminder(execution_dt: datetime):
     print(execution_dt)
     creds = generate_service_acct_creds()
     service = build('calendar', 'v3', credentials=creds)
-    # try:
     # Call the Calendar API
     start_dt, end_dt = get_daily_start_end(execution_dt)
     print(f"Getting events from {start_dt} to {end_dt}")
@@ -180,9 +179,6 @@ def send_reminder(execution_dt: datetime):
         print("Formatted slack message: ", slack_msg)
         response = requests.post(url=webhook, data=json.dumps(slack_msg))
         print("Post response: ", response)
-
-    # except Exception as error:
-    #     print('An error occurred: %s' % error)
 
 
 # Triggered from a message on a Cloud Pub/Sub topic.
