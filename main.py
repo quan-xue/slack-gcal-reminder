@@ -1,19 +1,15 @@
 import base64
-from datetime import datetime, timedelta
 import json
-import os.path
 from collections import defaultdict
+from datetime import datetime, timedelta
 from enum import Enum, unique
 from typing import List
 
-# import functions_framework
+import functions_framework
 import pandas as pd
 import pendulum
 import requests
-from google.auth.transport.requests import Request
 from google.oauth2 import service_account
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 
 # If modifying these scopes, delete the file token.json.
@@ -25,6 +21,7 @@ SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 # https://cloud.google.com/functions/docs/configuring/secrets
 
 LOCAL_TZ = pendulum.timezone("Asia/Singapore")
+
 
 @unique
 class EventType(Enum):
@@ -44,7 +41,7 @@ class CalEvent:
         # only contains date = full day event
         if 'date' in start.keys():
             self.event_type = EventType.FullDay
-            # formatted asyyyy-mm-dd
+            # formatted as yyyy-mm-dd
             self.start_dt_str = start['date']
             self.end_dt_str = end['date']
         else:
@@ -62,27 +59,6 @@ class CalEvent:
         if self.meeting_link:
             base_text += f"`{self.meeting_link}`"
         return base_text
-
-
-def generate_test_creds():
-    creds = None
-    # The file token.json stores the user's access and refresh tokens, and is
-    # created automatically when the authorization flow completes for the first
-    # time.
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    # If there are no (valid) credentials available, let the user log in.
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=5000)
-        # Save the credentials for the next run
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
-    return creds
 
 
 def generate_service_acct_creds():
@@ -176,10 +152,7 @@ def get_weekly_start_end(execution_dt: datetime):
 
 def send_reminder(execution_dt: datetime):
     print(execution_dt)
-    if TESTING_FLAG:
-        creds = generate_test_creds()
-    else:
-        creds = generate_service_acct_creds()
+    creds = generate_service_acct_creds()
     service = build('calendar', 'v3', credentials=creds)
     # try:
     # Call the Calendar API
@@ -213,7 +186,7 @@ def send_reminder(execution_dt: datetime):
 
 
 # Triggered from a message on a Cloud Pub/Sub topic.
-# @functions_framework.cloud_event
+@functions_framework.cloud_event
 def main(cloud_event):
     # Print out the data from Pub/Sub, to prove that it worked
     print(base64.b64decode(cloud_event.data["message"]["data"]))
@@ -222,10 +195,7 @@ def main(cloud_event):
     send_reminder(sys_time_in_sg)
 
 
-TESTING_FLAG = False
-
-
 if __name__ == '__main__':
-    dt = datetime.now()
-    # dt = datetime(2023, 1, 9)
+    # dt = datetime.now()
+    dt = datetime(2023, 1, 9)
     send_reminder(dt)
