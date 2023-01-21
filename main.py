@@ -15,9 +15,7 @@ from googleapiclient.discovery import build
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/calendar.readonly']
 
-
 # https://developers.google.com/calendar/api/quickstart/python
-
 # https://cloud.google.com/functions/docs/configuring/secrets
 
 LOCAL_TZ = pendulum.timezone("Asia/Singapore")
@@ -38,17 +36,23 @@ class CalEvent:
 
         start = gcal_event['start']
         end = gcal_event['end']
+        target_dt_fmt = "%-d %b *%H:%M*"
         # only contains date = full day event
         if 'date' in start.keys():
             self.event_type = EventType.FullDay
+            # full day event ends at 00:00 next day
             # formatted as yyyy-mm-dd
-            self.start_dt_str = start['date']
-            self.end_dt_str = end['date']
+            self.start_dt = datetime.fromisoformat(start['date']).replace(hour=0, minute=0)
+            self.end_dt = (datetime.fromisoformat(end['date']) - timedelta(days=1)).replace(hour=23, minute=59)
         else:
             self.event_type = EventType.PartialDay
-            target_dt_fmt = "%Y-%m-%d %H:%M"
-            self.start_dt_str = datetime.fromisoformat(start['dateTime']).strftime(target_dt_fmt)
-            self.end_dt_str = datetime.fromisoformat(end['dateTime']).strftime(target_dt_fmt)
+            self.start_dt = datetime.fromisoformat(start['dateTime'])
+            self.end_dt = datetime.fromisoformat(end['dateTime'])
+
+        self.start_dt = self.start_dt.replace(tzinfo=LOCAL_TZ)
+        self.end_dt = self.end_dt.replace(tzinfo=LOCAL_TZ)
+        self.start_dt_str = self.start_dt.strftime(target_dt_fmt)
+        self.end_dt_str = self.end_dt.strftime(target_dt_fmt)
 
     def format_slack_msg_section(self):
         base_text = f":calendar: <{self.link} |*{self.summary}*> \n"
@@ -83,17 +87,22 @@ def read_config():
     return webhook_to_cals
 
 
-def get_cal_events(service, cal_id: str, start_date: str, end_date: str):
+def fullday_events_end_correction(events: List[CalEvent], start_dt: datetime, end_dt: datetime) -> List[CalEvent]:
+    return [event for event in events if (start_dt <= event.end_dt and event.start_dt <= end_dt)]
+
+
+def get_cal_events(service, cal_id: str, start_dt: datetime, end_dt: datetime):
     events_result = service.events().list(
         calendarId=cal_id,
-        timeMin=start_date,
-        timeMax=end_date,
+        timeMin=start_dt.isoformat(),
+        timeMax=end_dt.isoformat(),
         singleEvents=True,
         orderBy='startTime'
     ).execute()
     events = events_result.get('items', [])
     print(f"Events found: {events}")
-    return [CalEvent(event) for event in events]
+    cal_events = [CalEvent(event) for event in events]
+    return fullday_events_end_correction(cal_events, start_dt, end_dt)
 
 
 def format_event_section_daily(cal_name: str, events: List[CalEvent]):
@@ -166,12 +175,12 @@ def send_reminder(execution_dt: datetime):
             cal_name = get_cal_name(service, cal_id)
             if execution_dt.weekday() == 0:
                 start_of_week_dt, end_of_week_dt = get_weekly_start_end(execution_dt)
-                week_events = get_cal_events(service, cal_id, start_of_week_dt.isoformat(),
-                                             end_of_week_dt.isoformat())
-                weekly_cal_section = format_event_section_weekly(cal_name,  week_events)
+                week_events = get_cal_events(service, cal_id, start_of_week_dt,
+                                             end_of_week_dt)
+                weekly_cal_section = format_event_section_weekly(cal_name, week_events)
                 all_cal_sections += weekly_cal_section
 
-            events = get_cal_events(service, cal_id, start_dt.isoformat(), end_dt.isoformat())
+            events = get_cal_events(service, cal_id, start_dt, end_dt)
             cal_section = format_event_section_daily(cal_name, events)
             all_cal_sections += cal_section
         print("all cal sections: ", all_cal_sections)
@@ -192,6 +201,6 @@ def main(cloud_event):
 
 
 if __name__ == '__main__':
-    # dt = datetime.now()
-    dt = datetime(2023, 1, 9)
+    dt = datetime.now()
+    # dt = datetime(2023, 2, 10)
     send_reminder(dt)
