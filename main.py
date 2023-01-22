@@ -3,7 +3,8 @@ import json
 from collections import defaultdict
 from datetime import datetime, timedelta
 from enum import Enum, unique
-from typing import List
+from typing import List, Dict
+from dataclasses import dataclass
 
 import functions_framework
 import pandas as pd
@@ -69,7 +70,16 @@ def generate_service_acct_creds():
     return service_account.Credentials.from_service_account_file('service_acct_credentials.json', scopes=SCOPES)
 
 
-def read_config():
+@dataclass
+class CalConfig:
+    calendar_id: str
+    description: str
+    weekend_ping: bool
+    zero_report: bool
+    weekly_report: bool
+
+
+def read_config() -> Dict[str, List[CalConfig]]:
     """
     Calendar ids and where to post them.
     Expecting config.csv.
@@ -79,10 +89,15 @@ def read_config():
     df = pd.read_csv(fp)
     webhook_to_cals = defaultdict(list)
     for row in df.itertuples():
-        cal_id = row.calendar_id
-        webhook = row.webhook
-        description = row.description  # for troubleshooting
-        webhook_to_cals[webhook].append((cal_id, description))
+        webhook_to_cals[row.webhook].append(
+            CalConfig(
+                calendar_id=row.calendar_id,
+                description=row.description,
+                weekend_ping=row.weekend_ping,
+                zero_report=row.zero_report,
+                weekly_report=row.weekly_report
+            )
+        )
 
     return webhook_to_cals
 
@@ -91,7 +106,7 @@ def fullday_events_end_correction(events: List[CalEvent], start_dt: datetime, en
     return [event for event in events if (start_dt <= event.end_dt and event.start_dt <= end_dt)]
 
 
-def get_cal_events(service, cal_id: str, start_dt: datetime, end_dt: datetime):
+def get_cal_events(service, cal_id: str, start_dt: datetime, end_dt: datetime) -> List[CalEvent]:
     events_result = service.events().list(
         calendarId=cal_id,
         timeMin=start_dt.isoformat(),
@@ -105,28 +120,23 @@ def get_cal_events(service, cal_id: str, start_dt: datetime, end_dt: datetime):
     return fullday_events_end_correction(cal_events, start_dt, end_dt)
 
 
-def format_event_section_daily(cal_name: str, events: List[CalEvent]):
+def format_event_section_daily(cal_name: str, events: List[CalEvent], zero_report: bool) -> List[str]:
     cal_start = f"*{cal_name}* has "
     if not events:
-        return [cal_start + f"no event today. _Ahhhh_ that empty schedule feeling 🏖️"]
+        return [cal_start + f"no event today. _Ahhhh_ that empty schedule feeling 🏖️"] if zero_report else []
     else:
         num_events = len(events)
         cal_starting_section = cal_start + f"_{num_events}_ events today."
         return [cal_starting_section] + [event.format_slack_msg_section() for event in events]
 
 
-def get_start_block_weekly():
-    return f"🤘to a new week"
-
-
-def format_event_section_weekly(cal_name: str, events: List[CalEvent]):
+def format_event_section_weekly(cal_name: str, events: List[CalEvent], zero_report: bool) -> List[str]:
     cal_start = f"*{cal_name}* has "
     if not events:
-        return [cal_start + f"nothing planned this week."]
-    else:
-        num_events = len(events)
-        cal_starting_section = cal_start + f"_{num_events}_ events this week."
-        return [cal_starting_section] + [event.format_slack_msg_section() for event in events]
+        return [cal_start + f"nothing planned this week."] if zero_report else []
+    num_events = len(events)
+    cal_starting_section = cal_start + f"_{num_events}_ events this week."
+    return [cal_starting_section] + [event.format_slack_msg_section() for event in events]
 
 
 def get_cal_name(service, cal_id):
@@ -163,27 +173,33 @@ def send_reminder(execution_dt: datetime):
     print(execution_dt)
     creds = generate_service_acct_creds()
     service = build('calendar', 'v3', credentials=creds)
-    # Call the Calendar API
     start_dt, end_dt = get_daily_start_end(execution_dt)
     print(f"Getting events from {start_dt} to {end_dt}")
     webhook_to_cals = read_config()
-    for webhook, cal_info in webhook_to_cals.items():
-        print(webhook, cal_info)
-        all_cal_sections = [get_start_block(execution_dt)]
-        for cal_id, description in cal_info:
-            print(f"Getting events for {description}")
-            cal_name = get_cal_name(service, cal_id)
-            if execution_dt.weekday() == 0:
+    is_weekend = execution_dt.weekday() > 4
+    for webhook, cal_configs in webhook_to_cals.items():
+        print(webhook, cal_configs)
+        all_cal_sections = []
+        if is_weekend:
+            cal_configs = [config for config in cal_configs if config.weekend_ping]
+        for config in cal_configs:
+            print(f"Getting events for {config.description}")
+            cal_name = get_cal_name(service, config.calendar_id)
+            if execution_dt.weekday() == 0 and config.weekly_report:
                 start_of_week_dt, end_of_week_dt = get_weekly_start_end(execution_dt)
-                week_events = get_cal_events(service, cal_id, start_of_week_dt,
+                week_events = get_cal_events(service, config.calendar_id, start_of_week_dt,
                                              end_of_week_dt)
-                weekly_cal_section = format_event_section_weekly(cal_name, week_events)
+                weekly_cal_section = format_event_section_weekly(cal_name, week_events, config.zero_report)
                 all_cal_sections += weekly_cal_section
 
-            events = get_cal_events(service, cal_id, start_dt, end_dt)
-            cal_section = format_event_section_daily(cal_name, events)
+            events = get_cal_events(service, config.calendar_id, start_dt, end_dt)
+            cal_section = format_event_section_daily(cal_name, events, config.zero_report)
             all_cal_sections += cal_section
         print("all cal sections: ", all_cal_sections)
+        # no ping to webhook if no event
+        if not all_cal_sections:
+            continue
+        all_cal_sections.insert(0, get_start_block(execution_dt))
         slack_msg = {"text": "\n\n".join(all_cal_sections)}
         print("Formatted slack message: ", slack_msg)
         response = requests.post(url=webhook, data=json.dumps(slack_msg))
@@ -201,6 +217,6 @@ def main(cloud_event):
 
 
 if __name__ == '__main__':
-    dt = datetime.now()
-    # dt = datetime(2023, 2, 10)
+    # dt = datetime.now()
+    dt = datetime(2023, 1, 22)
     send_reminder(dt)
