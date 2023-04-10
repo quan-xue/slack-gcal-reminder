@@ -179,31 +179,34 @@ def send_reminder(execution_dt: datetime):
     is_weekend = execution_dt.weekday() > 4
     for webhook, cal_configs in webhook_to_cals.items():
         print(webhook, cal_configs)
-        all_cal_sections = []
-        if is_weekend:
-            cal_configs = [config for config in cal_configs if config.weekend_ping]
-        for config in cal_configs:
-            print(f"Getting events for {config.description}")
-            cal_name = get_cal_name(service, config.calendar_id)
-            if execution_dt.weekday() == 0 and config.weekly_report:
-                start_of_week_dt, end_of_week_dt = get_weekly_start_end(execution_dt)
-                week_events = get_cal_events(service, config.calendar_id, start_of_week_dt,
-                                             end_of_week_dt)
-                weekly_cal_section = format_event_section_weekly(cal_name, week_events, config.zero_report)
-                all_cal_sections += weekly_cal_section
+        try:
+            all_cal_sections = []
+            if is_weekend:
+                cal_configs = [config for config in cal_configs if config.weekend_ping]
+            for config in cal_configs:
+                print(f"Getting events for {config.description}")
+                cal_name = get_cal_name(service, config.calendar_id)
+                if execution_dt.weekday() == 0 and config.weekly_report:
+                    start_of_week_dt, end_of_week_dt = get_weekly_start_end(execution_dt)
+                    week_events = get_cal_events(service, config.calendar_id, start_of_week_dt,
+                                                 end_of_week_dt)
+                    weekly_cal_section = format_event_section_weekly(cal_name, week_events, config.zero_report)
+                    all_cal_sections += weekly_cal_section
 
-            events = get_cal_events(service, config.calendar_id, start_dt, end_dt)
-            cal_section = format_event_section_daily(cal_name, events, config.zero_report)
-            all_cal_sections += cal_section
-        print("all cal sections: ", all_cal_sections)
-        # no ping to webhook if no event
-        if not all_cal_sections:
-            continue
-        all_cal_sections.insert(0, get_start_block(execution_dt))
-        slack_msg = {"text": "\n\n".join(all_cal_sections)}
-        print("Formatted slack message: ", slack_msg)
-        response = requests.post(url=webhook, data=json.dumps(slack_msg))
-        print("Post response: ", response)
+                events = get_cal_events(service, config.calendar_id, start_dt, end_dt)
+                cal_section = format_event_section_daily(cal_name, events, config.zero_report)
+                all_cal_sections += cal_section
+            print("all cal sections: ", all_cal_sections)
+            # no ping to webhook if no event
+            if not all_cal_sections:
+                continue
+            all_cal_sections.insert(0, get_start_block(execution_dt))
+            slack_msg = {"text": "\n\n".join(all_cal_sections)}
+            print("Formatted slack message: ", slack_msg)
+            response = requests.post(url=webhook, data=json.dumps(slack_msg))
+            print("Post response: ", response)
+        except Exception as e:
+            print(e)
 
 
 # Triggered from a message on a Cloud Pub/Sub topic.
@@ -217,6 +220,6 @@ def main(cloud_event):
 
 
 if __name__ == '__main__':
-    # dt = datetime.now()
-    dt = datetime(2023, 1, 22)
+    dt = datetime.now()
+    # dt = datetime(2023, 1, 22)
     send_reminder(dt)
