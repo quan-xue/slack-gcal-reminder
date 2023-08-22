@@ -6,7 +6,7 @@ from enum import Enum, unique
 from typing import List, Dict
 from dataclasses import dataclass
 
-import functions_framework
+# import functions_framework #comment out when testing
 import pandas as pd
 import pendulum
 import requests
@@ -210,7 +210,7 @@ def send_reminder(execution_dt: datetime):
 
 
 # Triggered from a message on a Cloud Pub/Sub topic.
-@functions_framework.cloud_event
+# @functions_framework.cloud_event # comment out when testing locally
 def main(cloud_event):
     # Print out the data from Pub/Sub, to prove that it worked
     print(base64.b64decode(cloud_event.data["message"]["data"]))
