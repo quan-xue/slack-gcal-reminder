@@ -6,7 +6,8 @@ from enum import Enum, unique
 from typing import List, Dict
 from dataclasses import dataclass
 
-# import functions_framework #comment out when testing
+#todo: comment out when testing
+import functions_framework
 import pandas as pd
 import pendulum
 import requests
@@ -89,15 +90,16 @@ def read_config() -> Dict[str, List[CalConfig]]:
     df = pd.read_csv(fp)
     webhook_to_cals = defaultdict(list)
     for row in df.itertuples():
-        webhook_to_cals[row.webhook].append(
-            CalConfig(
-                calendar_id=row.calendar_id,
-                description=row.description,
-                weekend_ping=row.weekend_ping,
-                zero_report=row.zero_report,
-                weekly_report=row.weekly_report
+        if row.is_active:
+            webhook_to_cals[row.webhook].append(
+                CalConfig(
+                    calendar_id=row.calendar_id,
+                    description=row.description,
+                    weekend_ping=row.weekend_ping,
+                    zero_report=row.zero_report,
+                    weekly_report=row.weekly_report
+                )
             )
-        )
 
     return webhook_to_cals
 
@@ -210,7 +212,7 @@ def send_reminder(execution_dt: datetime):
 
 
 # Triggered from a message on a Cloud Pub/Sub topic.
-# @functions_framework.cloud_event # comment out when testing locally
+@functions_framework.cloud_event # todo: comment out when testing
 def main(cloud_event):
     # Print out the data from Pub/Sub, to prove that it worked
     print(base64.b64decode(cloud_event.data["message"]["data"]))
