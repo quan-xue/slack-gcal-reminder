@@ -7,7 +7,7 @@ from typing import List, Dict
 from dataclasses import dataclass
 
 #todo: comment out when testing
-import functions_framework
+# import functions_framework
 import pandas as pd
 import pendulum
 import requests
@@ -181,13 +181,14 @@ def send_reminder(execution_dt: datetime):
     is_weekend = execution_dt.weekday() > 4
     for webhook, cal_configs in webhook_to_cals.items():
         print(webhook, cal_configs)
-        try:
-            all_cal_sections = []
-            if is_weekend:
-                cal_configs = [config for config in cal_configs if config.weekend_ping]
-            for config in cal_configs:
-                print(f"Getting events for {config.description}")
+        all_cal_sections = []
+        if is_weekend:
+            cal_configs = [config for config in cal_configs if config.weekend_ping]
+        for config in cal_configs:
+            print(f"Getting events for {config.description}")
+            try:
                 cal_name = get_cal_name(service, config.calendar_id)
+                # weekly report
                 if execution_dt.weekday() == 0 and config.weekly_report:
                     start_of_week_dt, end_of_week_dt = get_weekly_start_end(execution_dt)
                     week_events = get_cal_events(service, config.calendar_id, start_of_week_dt,
@@ -198,21 +199,22 @@ def send_reminder(execution_dt: datetime):
                 events = get_cal_events(service, config.calendar_id, start_dt, end_dt)
                 cal_section = format_event_section_daily(cal_name, events, config.zero_report)
                 all_cal_sections += cal_section
-            print("all cal sections: ", all_cal_sections)
-            # no ping to webhook if no event
-            if not all_cal_sections:
+            except Exception as e:
+                print(f"Error getting events for {config.calendar_id}: {e}")
                 continue
-            all_cal_sections.insert(0, get_start_block(execution_dt))
-            slack_msg = {"text": "\n\n".join(all_cal_sections)}
-            print("Formatted slack message: ", slack_msg)
-            response = requests.post(url=webhook, data=json.dumps(slack_msg))
-            print("Post response: ", response)
-        except Exception as e:
-            print(e)
+        print("all cal sections: ", all_cal_sections)
+        # no ping to webhook if no event
+        if not all_cal_sections:
+            continue
+        all_cal_sections.insert(0, get_start_block(execution_dt))
+        slack_msg = {"text": "\n\n".join(all_cal_sections)}
+        print("Formatted slack message: ", slack_msg)
+        response = requests.post(url=webhook, data=json.dumps(slack_msg))
+        print("Post response: ", response)
 
 
 # Triggered from a message on a Cloud Pub/Sub topic.
-@functions_framework.cloud_event # todo: comment out when testing
+# @functions_framework.cloud_event # todo: comment out when testing
 def main(cloud_event):
     # Print out the data from Pub/Sub, to prove that it worked
     print(base64.b64decode(cloud_event.data["message"]["data"]))
